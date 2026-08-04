@@ -9,8 +9,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/db/seed.ts"
+    "migrate": "node dist/db/migrate.js",
+    "seed": "node dist/db/seed.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -23,6 +23,7 @@
     "meilisearch": "^0.60.0",
     "morgan": "^1.10.0",
     "pg": "^8.13.1",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -33,7 +34,6 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
