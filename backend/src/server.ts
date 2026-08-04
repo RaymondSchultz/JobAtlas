@@ -6,8 +6,8 @@ assertRuntimeConfig();
 
 const app = createApp();
 
-const server = app.listen(config.port, () => {
-  console.log(`JobAtlas backend listening on :${config.port}`);
+const server = app.listen(config.port, "0.0.0.0", () => {
+  console.log(`JobAtlas backend listening on 0.0.0.0:${config.port}`);
 });
 
 async function shutdown() {
