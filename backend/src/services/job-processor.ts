@@ -141,8 +141,11 @@ export async function processEnvelope(input: unknown): Promise<ProcessResult[]> 
 
 export async function processBatch(input: unknown): Promise<ProcessResult[]> {
   if (Array.isArray(input)) {
-    const nested = await Promise.all(input.map((item) => processEnvelope(item)));
-    return nested.flat();
+    const results: ProcessResult[][] = [];
+    for (const item of input) {
+      results.push(await processEnvelope(item));
+    }
+    return results.flat();
   }
   return processEnvelope(input);
 }
