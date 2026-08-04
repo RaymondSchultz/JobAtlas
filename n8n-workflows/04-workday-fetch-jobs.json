@@ -1,0 +1,226 @@
+{
+  "name": "Jobs/Workday/Fetch Jobs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT external_ref, base_url FROM companies WHERE source='workday' AND is_active=true"
+      },
+      "id": "read-active-sources",
+      "name": "Read Active Sources",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 2
+      },
+      "id": "loop-source-records",
+      "name": "Loop Source Records",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.base_url + '/wday/cxs/' + $json.external_ref + '/jobs'}}",
+        "sendHeaders": false,
+        "sendBody": true,
+        "options": {
+          "timeout": 60000
+        },
+        "contentType": "json",
+        "jsonBody": "={{ { limit: 100, offset: $json.offset || 0, searchText: \"\" } }}",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 30000
+      },
+      "id": "fetch-source-jobs",
+      "name": "Fetch Source Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\"source\": \"workday\", \"fetchedAt\": \"={{$now.toISO()}}\", \"raw\": \"={{$json}}\"}",
+        "options": {}
+      },
+      "id": "build-processor-envelope",
+      "name": "Build Processor Envelope",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.INTERNAL_API_BASE_URL || 'https://internal.jobatlas.io/api/v1'}}/internal/jobs/batch",
+        "sendHeaders": true,
+        "sendBody": true,
+        "options": {
+          "timeout": 60000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Service-Key",
+              "value": "={{$env.INTERNAL_SERVICE_KEY}}"
+            }
+          ]
+        },
+        "contentType": "json",
+        "jsonBody": "={{$json}}",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 30000
+      },
+      "id": "post-internal-jobs-batch",
+      "name": "POST Internal Jobs Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.INTERNAL_API_BASE_URL || 'https://internal.jobatlas.io/api/v1'}}/internal/workflow-logs",
+        "sendHeaders": true,
+        "sendBody": true,
+        "options": {
+          "timeout": 60000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Service-Key",
+              "value": "={{$env.INTERNAL_SERVICE_KEY}}"
+            }
+          ]
+        },
+        "contentType": "json",
+        "jsonBody": "={{ { workflowName: $workflow.name, source: 'workday', status: 'success', finishedAt: $now.toISO(), response: $json } }}"
+      },
+      "id": "log-sync-summary",
+      "name": "Log Sync Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Active Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Active Sources": {
+      "main": [
+        [
+          {
+            "node": "Loop Source Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Source Records": {
+      "main": [
+        [
+          {
+            "node": "Fetch Source Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Source Jobs": {
+      "main": [
+        [
+          {
+            "node": "Build Processor Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Processor Envelope": {
+      "main": [
+        [
+          {
+            "node": "POST Internal Jobs Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Internal Jobs Batch": {
+      "main": [
+        [
+          {
+            "node": "Log Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionTimeout": 900,
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "active": false
+}

@@ -1,0 +1,141 @@
+{
+  "name": "AI/AI Matching",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "jobatlas/ai-matching",
+        "httpMethod": "POST",
+        "responseMode": "lastNode"
+      },
+      "id": "matching-webhook",
+      "name": "Matching Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "nightly-matching-schedule",
+      "name": "Nightly Matching Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.INTERNAL_API_BASE_URL || 'https://internal.jobatlas.io/api/v1'}}/internal/ai/matching/run",
+        "sendHeaders": true,
+        "sendBody": true,
+        "options": {
+          "timeout": 60000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Service-Key",
+              "value": "={{$env.INTERNAL_SERVICE_KEY}}"
+            }
+          ]
+        },
+        "contentType": "json",
+        "jsonBody": "={{$json}}",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 30000
+      },
+      "id": "run-matching",
+      "name": "Run Matching",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        320,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.INTERNAL_API_BASE_URL || 'https://internal.jobatlas.io/api/v1'}}/internal/workflow-logs",
+        "sendHeaders": true,
+        "sendBody": true,
+        "options": {
+          "timeout": 60000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Service-Key",
+              "value": "={{$env.INTERNAL_SERVICE_KEY}}"
+            }
+          ]
+        },
+        "contentType": "json",
+        "jsonBody": "={{ { workflowName: $workflow.name, status: 'success', finishedAt: $now.toISO(), response: $json } }}"
+      },
+      "id": "log-matching-result",
+      "name": "Log Matching Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        640,
+        20
+      ]
+    }
+  ],
+  "connections": {
+    "Matching Webhook": {
+      "main": [
+        [
+          {
+            "node": "Run Matching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nightly Matching Schedule": {
+      "main": [
+        [
+          {
+            "node": "Run Matching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Matching": {
+      "main": [
+        [
+          {
+            "node": "Log Matching Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionTimeout": 3600,
+    "saveExecutionProgress": true
+  },
+  "active": false
+}
