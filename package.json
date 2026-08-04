@@ -1,0 +1,14 @@
+{
+  "name": "jobatlas-root",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --prefix backend",
+    "start": "npm run migrate --prefix backend && npm run start --prefix backend"
+  }
+}
+
