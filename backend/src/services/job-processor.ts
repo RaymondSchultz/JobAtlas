@@ -162,9 +162,11 @@ export async function processEnvelope(input: unknown): Promise<ProcessResult[]> 
       .filter((r) => (r.action === "created" || r.action === "updated") && r.jobId)
       .map((r) => r.jobId as string);
     if (affectedJobIds.length > 0) {
-      indexJobsInMeili(affectedJobIds).catch((err) =>
-        console.error("Async Meilisearch indexing error:", err),
-      );
+      setImmediate(() => {
+        indexJobsInMeili(affectedJobIds).catch((err) =>
+          console.error("Async Meilisearch indexing error:", err),
+        );
+      });
     }
 
     return results;

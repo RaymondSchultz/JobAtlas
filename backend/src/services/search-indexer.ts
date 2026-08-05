@@ -34,6 +34,7 @@ export function getMeiliClient(): Meilisearch | null {
     client = new Meilisearch({
       host: config.meilisearchUrl,
       apiKey: config.meiliMasterKey || undefined,
+      timeout: 3000,
     });
     return client;
   } catch (error) {
