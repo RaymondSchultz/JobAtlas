@@ -44,6 +44,17 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     });
   }
 
+  if (error && typeof error === "object" && ("type" in error && error.type === "entity.too.large" || "status" in error && error.status === 413)) {
+    return res.status(413).json({
+      error: {
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Payload size exceeds maximum allowed limit",
+        requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+
   console.error({ requestId, error });
   return res.status(500).json({
     error: {

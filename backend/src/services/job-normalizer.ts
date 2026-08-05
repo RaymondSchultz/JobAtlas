@@ -87,10 +87,17 @@ export function normalizeJob(envelope: JobEnvelope, rawJob: unknown): Normalized
     };
   }
 
-  const companySlug = firstString(raw.companySlug, companyName)
+function safeDateString(val?: string | null): string | null {
+  if (!val) return null;
+  const parsed = Date.parse(val);
+  if (isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
+  const companySlug = (firstString(raw.companySlug, companyName)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+|-+$/g, "")) || "unknown-company";
 
   return {
     source: envelope.source,
@@ -106,7 +113,7 @@ export function normalizeJob(envelope: JobEnvelope, rawJob: unknown): Normalized
     salaryMin: typeof raw.salaryMin === "number" ? raw.salaryMin : null,
     salaryMax: typeof raw.salaryMax === "number" ? raw.salaryMax : null,
     currency: firstString(raw.currency).slice(0, 3).toUpperCase() || null,
-    postedAt: firstString(raw.postedAt, raw.updatedAt, raw.updated_at, raw.createdAt) || null,
+    postedAt: safeDateString(firstString(raw.postedAt, raw.updatedAt, raw.updated_at, raw.createdAt)),
     applyUrl,
   };
 }

@@ -21,7 +21,8 @@ export function createApp() {
 
   app.use(helmet());
   app.use(cors());
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(morgan("combined"));
 
   app.use("/health", healthRouter);
