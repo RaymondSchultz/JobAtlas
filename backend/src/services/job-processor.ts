@@ -46,23 +46,65 @@ async function persistJob(db: DbClient, job: NormalizedJob): Promise<ProcessResu
   const companyId = await upsertCompany(db, job.companyName, job.companySlug);
   const fingerprintHash = fingerprint(job);
 
-  const result = await db.query(
+  const existing = await db.query(
+    "SELECT id FROM jobs WHERE (source_id = $1 AND external_id = $2) OR fingerprint_hash = $3 LIMIT 1",
+    [sourceId, job.externalId, fingerprintHash],
+  );
+
+  if (existing.rows[0]) {
+    const id = existing.rows[0].id as string;
+    await db.query(
+      `UPDATE jobs SET
+         source_id = $1,
+         external_id = $2,
+         fingerprint_hash = $3,
+         company_id = $4,
+         title = $5,
+         description = $6,
+         description_html = $7,
+         location_raw = $8,
+         is_remote = $9,
+         employment_type = $10,
+         salary_min = $11,
+         salary_max = $12,
+         currency = $13,
+         posted_at = $14,
+         apply_url = $15,
+         last_seen_at = now(),
+         updated_at = now(),
+         status = 'active',
+         expired_at = NULL
+       WHERE id = $16`,
+      [
+        sourceId,
+        job.externalId,
+        fingerprintHash,
+        companyId,
+        job.title,
+        job.description,
+        job.descriptionHtml,
+        job.locationRaw,
+        job.isRemote,
+        job.employmentType,
+        job.salaryMin,
+        job.salaryMax,
+        job.currency,
+        job.postedAt,
+        job.applyUrl,
+        id,
+      ],
+    );
+    await db.query("INSERT INTO job_updates (job_id, change_type) VALUES ($1, 'refreshed')", [id]);
+    return { jobId: id, action: "updated", fingerprintHash };
+  }
+
+  const inserted = await db.query(
     `INSERT INTO jobs (
        source_id, external_id, fingerprint_hash, company_id, title, description, description_html,
        location_raw, is_remote, employment_type, salary_min, salary_max, currency, posted_at, apply_url
      )
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-     ON CONFLICT (fingerprint_hash)
-     DO UPDATE SET
-       last_seen_at = now(),
-       updated_at = now(),
-       status = 'active',
-       expired_at = NULL,
-       title = EXCLUDED.title,
-       description = EXCLUDED.description,
-       description_html = EXCLUDED.description_html,
-       apply_url = EXCLUDED.apply_url
-     RETURNING id, (xmax = 0) AS was_inserted`,
+     RETURNING id`,
     [
       sourceId,
       job.externalId,
@@ -82,14 +124,9 @@ async function persistJob(db: DbClient, job: NormalizedJob): Promise<ProcessResu
     ],
   );
 
-  const row = result.rows[0];
-  const action = row.was_inserted ? "created" : "updated";
-  await db.query("INSERT INTO job_updates (job_id, change_type) VALUES ($1, $2)", [
-    row.id,
-    action === "created" ? "created" : "refreshed",
-  ]);
-
-  return { jobId: row.id, action, fingerprintHash };
+  const id = inserted.rows[0].id as string;
+  await db.query("INSERT INTO job_updates (job_id, change_type) VALUES ($1, 'created')", [id]);
+  return { jobId: id, action: "created", fingerprintHash };
 }
 
 function isRejectedJob(value: NormalizedJob | { action: "rejected" }): value is { action: "rejected"; reason: string; validationErrors: string[] } {
