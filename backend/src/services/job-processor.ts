@@ -133,6 +133,135 @@ function isRejectedJob(value: NormalizedJob | { action: "rejected" }): value is 
   return "action" in value && value.action === "rejected";
 }
 
+async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: NormalizedJob[]): Promise<ProcessResult[]> {
+  if (validJobs.length === 0) return [];
+
+  const companyPairs = Array.from(
+    new Map(validJobs.map((j) => [j.companySlug, { name: j.companyName, slug: j.companySlug }])).values(),
+  );
+
+  const companyRes = await db.query(
+    `INSERT INTO companies (name, slug)
+     SELECT u.name, u.slug
+     FROM UNNEST($1::text[], $2::text[]) AS u(name, slug)
+     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+     RETURNING id, slug`,
+    [companyPairs.map((c) => c.name), companyPairs.map((c) => c.slug)],
+  );
+
+  const companyMap = new Map<string, string>();
+  for (const row of companyRes.rows) {
+    companyMap.set(row.slug, row.id);
+  }
+
+  const jobItems = validJobs.map((job) => {
+    const companyId = companyMap.get(job.companySlug)!;
+    const fpHash = fingerprint(job);
+    return { job, companyId, fpHash };
+  });
+
+  const batchUniqueMap = new Map<string, typeof jobItems[0]>();
+  for (const item of jobItems) {
+    batchUniqueMap.set(item.job.externalId, item);
+  }
+  const uniqueItems = Array.from(batchUniqueMap.values());
+
+  const upsertRes = await db.query(
+    `INSERT INTO jobs (
+       source_id, external_id, fingerprint_hash, company_id, title, description, description_html,
+       location_raw, is_remote, employment_type, salary_min, salary_max, currency, posted_at, apply_url,
+       last_seen_at, updated_at, status
+     )
+     SELECT
+       $1,
+       u.external_id,
+       u.fingerprint_hash,
+       u.company_id,
+       u.title,
+       u.description,
+       u.description_html,
+       u.location_raw,
+       u.is_remote,
+       u.employment_type::employment_type,
+       u.salary_min,
+       u.salary_max,
+       u.currency,
+       u.posted_at,
+       u.apply_url,
+       now(),
+       now(),
+       'active'::job_status
+     FROM UNNEST(
+       $2::text[], $3::text[], $4::uuid[], $5::text[], $6::text[], $7::text[],
+       $8::text[], $9::boolean[], $10::text[], $11::numeric[], $12::numeric[],
+       $13::text[], $14::timestamptz[], $15::text[]
+     ) AS u(
+       external_id, fingerprint_hash, company_id, title, description, description_html,
+       location_raw, is_remote, employment_type, salary_min, salary_max,
+       currency, posted_at, apply_url
+     )
+     ON CONFLICT (source_id, external_id)
+     DO UPDATE SET
+       fingerprint_hash = EXCLUDED.fingerprint_hash,
+       company_id = EXCLUDED.company_id,
+       title = EXCLUDED.title,
+       description = EXCLUDED.description,
+       description_html = EXCLUDED.description_html,
+       location_raw = EXCLUDED.location_raw,
+       is_remote = EXCLUDED.is_remote,
+       employment_type = EXCLUDED.employment_type,
+       salary_min = EXCLUDED.salary_min,
+       salary_max = EXCLUDED.salary_max,
+       currency = EXCLUDED.currency,
+       posted_at = EXCLUDED.posted_at,
+       apply_url = EXCLUDED.apply_url,
+       last_seen_at = now(),
+       updated_at = now(),
+       status = 'active'::job_status,
+       expired_at = NULL
+     RETURNING id, fingerprint_hash, (xmax = 0) AS was_inserted`,
+    [
+      sourceId,
+      uniqueItems.map((i) => i.job.externalId),
+      uniqueItems.map((i) => i.fpHash),
+      uniqueItems.map((i) => i.companyId),
+      uniqueItems.map((i) => i.job.title),
+      uniqueItems.map((i) => i.job.description),
+      uniqueItems.map((i) => i.job.descriptionHtml || null),
+      uniqueItems.map((i) => i.job.locationRaw || null),
+      uniqueItems.map((i) => i.job.isRemote),
+      uniqueItems.map((i) => i.job.employmentType),
+      uniqueItems.map((i) => i.job.salaryMin ?? null),
+      uniqueItems.map((i) => i.job.salaryMax ?? null),
+      uniqueItems.map((i) => i.job.currency || null),
+      uniqueItems.map((i) => (i.job.postedAt ? new Date(i.job.postedAt) : null)),
+      uniqueItems.map((i) => i.job.applyUrl),
+    ],
+  );
+
+  const results: ProcessResult[] = [];
+  const updateJobIds: string[] = [];
+  const updateChangeTypes: string[] = [];
+
+  for (const row of upsertRes.rows) {
+    const action = row.was_inserted ? "created" : "updated";
+    results.push({ jobId: row.id, action, fingerprintHash: row.fingerprint_hash });
+    updateJobIds.push(row.id);
+    updateChangeTypes.push(action === "created" ? "created" : "refreshed");
+  }
+
+  if (updateJobIds.length > 0) {
+    await db.query(
+      `INSERT INTO job_updates (job_id, change_type)
+       SELECT u.id, u.change_type::job_change_type
+       FROM UNNEST($1::uuid[], $2::text[]) AS u(id, change_type)`,
+      [updateJobIds, updateChangeTypes],
+    );
+  }
+
+  return results;
+}
+
 export async function processEnvelope(input: unknown): Promise<ProcessResult[]> {
   const parsed = jobEnvelopeSchema.safeParse(input);
   if (!parsed.success) {
@@ -146,18 +275,26 @@ export async function processEnvelope(input: unknown): Promise<ProcessResult[]> 
   try {
     await client.query("BEGIN");
     const results: ProcessResult[] = [];
+    const validJobs: NormalizedJob[] = [];
+
     for (const rawJob of rawJobs) {
       const normalized = normalizeJob(envelope, rawJob);
       if (isRejectedJob(normalized)) {
         results.push(normalized);
-        continue;
+      } else {
+        validJobs.push(normalized);
       }
-      results.push(await persistJob(client, normalized));
     }
+
+    if (validJobs.length > 0) {
+      const sourceId = await getSourceId(client, envelope.source);
+      const batchResults = await persistBatchJobs(client, sourceId, validJobs);
+      results.push(...batchResults);
+    }
+
     await updateSourceSync(client, envelope, results);
     await client.query("COMMIT");
 
-    // Asynchronously trigger Meilisearch indexing for created/updated jobs
     const affectedJobIds = results
       .filter((r) => (r.action === "created" || r.action === "updated") && r.jobId)
       .map((r) => r.jobId as string);
