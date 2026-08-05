@@ -11,9 +11,9 @@ const needsSsl = config.nodeEnv === "production" || rawUrl.includes("neon.tech")
 export const pool = new Pool({
   connectionString: cleanUrl || rawUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
-  max: 20,
+  max: 50,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 30_000,
 });
 
 export type DbClient = pg.Pool | pg.PoolClient;
