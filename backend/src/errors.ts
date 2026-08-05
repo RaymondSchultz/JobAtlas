@@ -59,7 +59,8 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
   return res.status(500).json({
     error: {
       code: "INTERNAL_ERROR",
-      message: "Unhandled server error",
+      message: error instanceof Error ? error.message : "Unhandled server error",
+      details: error instanceof Error ? error.stack : String(error),
       requestId,
       timestamp: new Date().toISOString(),
     },
