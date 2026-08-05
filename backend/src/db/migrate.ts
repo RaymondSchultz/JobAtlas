@@ -52,7 +52,10 @@ async function run() {
 }
 
 run()
-  .then(() => pool.end())
+  .then(async () => {
+    await pool.end();
+    process.exit(0);
+  })
   .catch(async (error) => {
     console.error(error);
     await pool.end();
