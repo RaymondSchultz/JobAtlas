@@ -253,7 +253,7 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
   if (updateJobIds.length > 0) {
     await db.query(
       `INSERT INTO job_updates (job_id, change_type)
-       SELECT u.id, u.change_type::job_change_type
+       SELECT u.id, u.change_type
        FROM UNNEST($1::uuid[], $2::text[]) AS u(id, change_type)`,
       [updateJobIds, updateChangeTypes],
     );
