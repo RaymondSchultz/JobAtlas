@@ -21,6 +21,10 @@ services:
         value: dev-internal-service-key
       - key: JWT_SECRET
         value: dev-only-secret-jwt-key
+      # In-process job ingestion. Note: on the free plan the service sleeps
+      # after ~15 min idle, and scheduled runs stop while it is asleep.
+      - key: INGESTION_ENABLED
+        value: false
 
   # 2. Frontend Next.js Web Service
   - type: web

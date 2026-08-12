@@ -21,6 +21,7 @@ internalRouter.post("/jobs/batch", async (req, res) => {
     summary: {
       created: results.filter((item) => item.action === "created").length,
       updated: results.filter((item) => item.action === "updated").length,
+      duplicate: results.filter((item) => item.action === "duplicate").length,
       rejected: results.filter((item) => item.action === "rejected").length,
     },
   });

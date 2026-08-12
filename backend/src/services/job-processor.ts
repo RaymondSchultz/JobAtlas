@@ -7,7 +7,7 @@ import { indexJobsInMeili } from "./search-indexer.js";
 
 export interface ProcessResult {
   jobId?: string;
-  action: "created" | "updated" | "rejected";
+  action: "created" | "updated" | "rejected" | "duplicate";
   fingerprintHash?: string;
   reason?: string;
   validationErrors?: string[];
@@ -160,11 +160,57 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
     return { job, companyId, fpHash };
   });
 
-  const batchUniqueMap = new Map<string, typeof jobItems[0]>();
+  const results: ProcessResult[] = [];
+
+  // A single payload can carry the same posting twice: under one external id, or
+  // under two ids that fingerprint identically. Collapse both before the upsert.
+  // Each collapse is recorded so the caller's counts reconcile against the
+  // number of records fetched, rather than a row silently disappearing.
+  const byExternalId = new Map<string, typeof jobItems[0]>();
   for (const item of jobItems) {
-    batchUniqueMap.set(item.job.externalId, item);
+    if (byExternalId.has(item.job.externalId)) {
+      results.push({ action: "duplicate", fingerprintHash: item.fpHash, reason: "DUPLICATE_EXTERNAL_ID_IN_BATCH" });
+    }
+    byExternalId.set(item.job.externalId, item);
   }
-  const uniqueItems = Array.from(batchUniqueMap.values());
+
+  const byFingerprint = new Map<string, typeof jobItems[0]>();
+  for (const item of byExternalId.values()) {
+    if (byFingerprint.has(item.fpHash)) {
+      results.push({ action: "duplicate", fingerprintHash: item.fpHash, reason: "DUPLICATE_FINGERPRINT_IN_BATCH" });
+      continue;
+    }
+    byFingerprint.set(item.fpHash, item);
+  }
+
+  // The same posting syndicated by several aggregators fingerprints identically.
+  // Skip rows already owned by a different (source_id, external_id) so one
+  // duplicate does not cost us the rest of the batch.
+  const claimedBy = new Map<string, { sourceId: string; externalId: string }>();
+  if (byFingerprint.size > 0) {
+    const claimRes = await db.query(
+      `SELECT fingerprint_hash, source_id, external_id
+       FROM jobs
+       WHERE fingerprint_hash = ANY($1::char(64)[])`,
+      [Array.from(byFingerprint.keys())],
+    );
+    for (const row of claimRes.rows) {
+      claimedBy.set(row.fingerprint_hash, { sourceId: row.source_id, externalId: row.external_id });
+    }
+  }
+
+  const uniqueItems: typeof jobItems = [];
+  for (const item of byFingerprint.values()) {
+    const claim = claimedBy.get(item.fpHash);
+    const ownedByThisRow = claim && claim.sourceId === sourceId && claim.externalId === item.job.externalId;
+    if (claim && !ownedByThisRow) {
+      results.push({ action: "duplicate", fingerprintHash: item.fpHash, reason: "DUPLICATE_OF_EXISTING_JOB" });
+      continue;
+    }
+    uniqueItems.push(item);
+  }
+
+  if (uniqueItems.length === 0) return results;
 
   const upsertRes = await db.query(
     `INSERT INTO jobs (
@@ -239,7 +285,6 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
     ],
   );
 
-  const results: ProcessResult[] = [];
   const updateJobIds: string[] = [];
   const updateChangeTypes: string[] = [];
 
@@ -351,8 +396,14 @@ export async function expireJobs(olderThanDays: number) {
      RETURNING id`,
     [olderThanDays],
   );
-  for (const row of result.rows) {
-    await pool.query("INSERT INTO job_updates (job_id, change_type) VALUES ($1, 'expired')", [row.id]);
+
+  if (result.rows.length > 0) {
+    await pool.query(
+      `INSERT INTO job_updates (job_id, change_type)
+       SELECT id, 'expired' FROM UNNEST($1::uuid[]) AS t(id)`,
+      [result.rows.map((row) => row.id)],
+    );
   }
+
   return { expired: result.rowCount ?? 0 };
 }
