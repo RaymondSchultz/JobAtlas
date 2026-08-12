@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db/pool.js";
+import { applyGeoFilter, parseGeoQuery } from "../utils/geo-filter.js";
 import { parseLimit } from "../utils/pagination.js";
 
 export const searchRouter = Router();
@@ -20,17 +21,22 @@ searchRouter.get("/", async (req, res) => {
     where.push(`j.is_remote = $${params.length}`);
   }
 
+  const geo = parseGeoQuery(req.query);
+  const { distanceExpr } = applyGeoFilter(geo, params, where);
+  const sortByDistance = distanceExpr !== null && req.query.sort === "distance";
+
   params.push(limit);
   const result = await pool.query(
     `SELECT j.id, j.title, j.location_raw, j.is_remote, j.employment_type, j.salary_min, j.salary_max,
             j.currency, j.posted_at, j.apply_url, j.status, j.company_id,
             c.name AS company_name, c.logo_url, co.iso_code AS country_iso, ci.name AS city_name
+            ${distanceExpr ? `, ${distanceExpr} AS distance_km` : ""}
      FROM jobs j
      JOIN companies c ON c.id = j.company_id
      LEFT JOIN countries co ON co.id = j.country_id
      LEFT JOIN cities ci ON ci.id = j.city_id
      WHERE ${where.join(" AND ")}
-     ORDER BY j.posted_at DESC NULLS LAST
+     ORDER BY ${sortByDistance ? "distance_km ASC NULLS LAST, " : ""}j.posted_at DESC NULLS LAST
      LIMIT $${params.length}`,
     params,
   );
@@ -40,7 +46,15 @@ searchRouter.get("/", async (req, res) => {
       id: row.id,
       title: row.title,
       company: { id: row.company_id, name: row.company_name, logoUrl: row.logo_url },
-      location: { country: row.country_iso, city: row.city_name, isRemote: row.is_remote, raw: row.location_raw },
+      location: {
+        country: row.country_iso,
+        city: row.city_name,
+        isRemote: row.is_remote,
+        raw: row.location_raw,
+        ...(row.distance_km !== undefined && row.distance_km !== null
+          ? { distanceKm: Math.round(Number(row.distance_km) * 10) / 10 }
+          : {}),
+      },
       employmentType: row.employment_type,
       salary: { min: row.salary_min === null ? null : Number(row.salary_min), max: row.salary_max === null ? null : Number(row.salary_max), currency: row.currency },
       postedAt: row.posted_at,

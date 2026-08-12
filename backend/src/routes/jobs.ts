@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db/pool.js";
 import { ApiError } from "../errors.js";
+import { applyGeoFilter, parseGeoQuery } from "../utils/geo-filter.js";
 import { decodeCursor, encodeCursor, parseLimit } from "../utils/pagination.js";
 
 export const jobsRouter = Router();
@@ -10,7 +11,17 @@ function mapJob(row: any) {
     id: row.id,
     title: row.title,
     company: { id: row.company_id, name: row.company_name, logoUrl: row.logo_url },
-    location: { country: row.country_iso, city: row.city_name, isRemote: row.is_remote, raw: row.location_raw },
+    location: {
+      country: row.country_iso,
+      city: row.city_name,
+      isRemote: row.is_remote,
+      raw: row.location_raw,
+      // Present only for radius queries; rounded because sub-100m precision on
+      // a city centroid would imply accuracy the data does not have.
+      ...(row.distance_km !== undefined && row.distance_km !== null
+        ? { distanceKm: Math.round(Number(row.distance_km) * 10) / 10 }
+        : {}),
+    },
     employmentType: row.employment_type,
     salary: { min: row.salary_min === null ? null : Number(row.salary_min), max: row.salary_max === null ? null : Number(row.salary_max), currency: row.currency },
     postedAt: row.posted_at,
@@ -37,7 +48,14 @@ jobsRouter.get("/", async (req, res) => {
     params.push(req.query.companyId);
     where.push(`j.company_id = $${params.length}`);
   }
-  if (cursor) {
+
+  const geo = parseGeoQuery(req.query);
+  const { distanceExpr } = applyGeoFilter(geo, params, where);
+
+  // Distance ordering has no stable cursor, so that mode is a single page.
+  const sortByDistance = distanceExpr !== null && req.query.sort === "distance";
+
+  if (cursor && !sortByDistance) {
     params.push(cursor.postedAt, cursor.id);
     where.push(`(j.posted_at, j.id) < ($${params.length - 1}, $${params.length})`);
   }
@@ -45,12 +63,13 @@ jobsRouter.get("/", async (req, res) => {
   params.push(limit + 1);
   const result = await pool.query(
     `SELECT j.*, c.name AS company_name, c.logo_url, co.iso_code AS country_iso, ci.name AS city_name
+            ${distanceExpr ? `, ${distanceExpr} AS distance_km` : ""}
      FROM jobs j
      JOIN companies c ON c.id = j.company_id
      LEFT JOIN countries co ON co.id = j.country_id
      LEFT JOIN cities ci ON ci.id = j.city_id
      WHERE ${where.join(" AND ")}
-     ORDER BY j.posted_at DESC NULLS LAST, j.id DESC
+     ORDER BY ${sortByDistance ? "distance_km ASC NULLS LAST, " : ""}j.posted_at DESC NULLS LAST, j.id DESC
      LIMIT $${params.length}`,
     params,
   );
@@ -61,7 +80,10 @@ jobsRouter.get("/", async (req, res) => {
     data: rows.map(mapJob),
     pagination: {
       limit,
-      nextCursor: result.rows.length > limit && last ? encodeCursor({ postedAt: last.posted_at, id: last.id }) : null,
+      nextCursor:
+        !sortByDistance && result.rows.length > limit && last
+          ? encodeCursor({ postedAt: last.posted_at, id: last.id })
+          : null,
       hasMore: result.rows.length > limit,
     },
   });
