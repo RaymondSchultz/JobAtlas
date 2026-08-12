@@ -46,8 +46,11 @@ function usefulAlternateNames(raw: string, canonical: string): string[] {
 
   for (const candidate of raw.split(",")) {
     const name = candidate.trim();
-    // Two-character forms collide with country and region codes.
-    if (name.length < 3 || name.length > 60) continue;
+    // Under four characters is an airport or abbreviation code (MUC, CGN, KLN),
+    // never a name a job feed writes. Excluding them matters: they used to
+    // crowd out the real exonyms, leaving Munich without "München" and Köln
+    // without "Cologne".
+    if (name.length < 4 || name.length > 60) continue;
     if (!/^[\p{Script=Latin}\p{M}0-9 .'\-]+$/u.test(name)) continue;
 
     // Stored lowercased: aliases exist only for matching (display always uses
@@ -65,14 +68,24 @@ function usefulAlternateNames(raw: string, canonical: string): string[] {
     else if ([...canonicalTokens].every((token) => tokens.includes(token))) score += 60;
     // Plain ASCII beats transliterations carrying diacritics.
     if (/^[\x20-\x7e]+$/.test(name)) score += 20;
-    score -= name.length / 10;
+    // Archaic and ceremonial forms ("Colonia Claudia Ara Agrippinensium") are
+    // the only entries worth demoting. Penalising length generally is wrong:
+    // it ranks transliterations like "Keln" and "Cwlen" above the exonym
+    // "Cologne", which is the spelling a job feed actually uses.
+    if (name.length > 25) score -= 30;
 
     scored.push({ name, score });
   }
 
+  // Kept generous: transliterations are indistinguishable from exonyms without
+  // language tags, which cities15000.txt does not carry, so a tight cap loses
+  // real names rather than noise.
+  // Ties keep GeoNames' own order, and the cap is generous because
+  // transliterations are indistinguishable from exonyms without language tags,
+  // which cities15000.txt does not carry — a tight cap loses real names.
   return scored
     .sort((a, b) => b.score - a.score)
-    .slice(0, 12)
+    .slice(0, 40)
     .map((entry) => entry.name.toLowerCase());
 }
 

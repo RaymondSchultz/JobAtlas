@@ -57,7 +57,7 @@ const NON_PLACES = new Set([
 const MULTI_SITE = /^\d+\s+locations?$/i;
 
 /** Qualifiers that decorate a location without naming one. */
-const NOISE = /\b(remote|hybrid|on-?site|in-?office|flexible|optional|based|area|region|metro|greater|multiple)\b/gi;
+const NOISE = /\b(remote|hybrid|on-?site|in-?office|flexible|optional|based|area|region|metro|greater|multiple|offices?|hq|headquarters)\b/gi;
 
 function normalize(value: string): string {
   return value
@@ -190,10 +190,30 @@ export function resolveLocation(raw: string | null | undefined, gaz: Gazetteer):
   const tokens = tokenize(raw).filter((token) => !NON_PLACES.has(token) && !MULTI_SITE.test(token));
   if (tokens.length === 0) return { countryId: null, cityId: null, confidence: "none", reason: "not a place" };
 
+  // Two-letter tokens are ambiguous between a country and a US state: CA is
+  // both Canada and California, IL both Israel and Illinois, GA both Gabon and
+  // Georgia. "City, ST" is overwhelmingly the US convention, so when another
+  // token names a US city in that state, read the token as a region.
+  //
+  // Without this, "Chicago, IL" filed under Israel and every Californian city
+  // under Canada — a wrong country rather than a missing one.
+  const regionOnlyTokens = new Set<string>();
+  for (const token of tokens) {
+    if (token.length !== 2) continue;
+    const namesUsStateOfSomeCity = tokens.some((other) =>
+      other !== token &&
+      (gaz.citiesByName.get(other) ?? []).some(
+        (candidate) => candidate.countryIso === "US" && candidate.admin1?.toLowerCase() === token,
+      ),
+    );
+    if (namesUsStateOfSomeCity) regionOnlyTokens.add(token);
+  }
+
   // Country evidence, from an ISO code or a country name anywhere in the string.
   let countryId: string | null = null;
   let countryIso: string | null = null;
   for (const token of tokens) {
+    if (regionOnlyTokens.has(token)) continue;
     const byName = gaz.countryIdByName.get(token);
     const byIso = token.length === 2 ? gaz.countryIdByIso.get(token) : undefined;
     const id = byName ?? byIso;
@@ -210,6 +230,7 @@ export function resolveLocation(raw: string | null | undefined, gaz: Gazetteer):
   // within a country that actually uses that code.
   const regionTokens = tokens.filter((token) => {
     if (token.length !== 2) return false;
+    if (regionOnlyTokens.has(token)) return true;
     if (countryIso) return gaz.admin1ByCountry.get(countryIso.toUpperCase())?.has(token) ?? false;
     return [...gaz.admin1ByCountry.values()].some((set) => set.has(token));
   });

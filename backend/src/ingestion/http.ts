@@ -80,6 +80,15 @@ export function isoDate(value: unknown): string | null {
   return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
 }
 
+/** Some feeds date postings with Unix epoch seconds rather than a string. */
+export function isoDateFromEpoch(value: unknown): string | null {
+  const seconds = typeof value === "number" ? value : Number(text(value));
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(seconds * 1000).toISOString();
+}
+
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Feeds use 0 to mean "not disclosed"; the column should stay NULL. */
 export function positiveNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(text(value));
