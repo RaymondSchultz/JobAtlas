@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool } from "../db/pool.js";
 import { ApiError } from "../errors.js";
+import { resolveLocations } from "../geo/location-resolver.js";
 import { extractJobsFromEnvelope, jobEnvelopeSchema, normalizeJob, type JobEnvelope, type NormalizedJob } from "./job-normalizer.js";
 import { indexJobsInMeili } from "./search-indexer.js";
 
@@ -212,11 +213,23 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
 
   if (uniqueItems.length === 0) return results;
 
+  // Resolve free-text locations to country/city ids so jobs are geographically
+  // filterable the moment they land, rather than needing a separate backfill.
+  // A failure here must not cost us the batch — an unresolved location is a
+  // degraded row, not a broken one.
+  let geo: { countryId: string | null; cityId: string | null }[];
+  try {
+    geo = await resolveLocations(db, uniqueItems.map((item) => item.job.locationRaw));
+  } catch (error) {
+    console.error("Location resolution unavailable; ingesting without geo ids:", error);
+    geo = uniqueItems.map(() => ({ countryId: null, cityId: null }));
+  }
+
   const upsertRes = await db.query(
     `INSERT INTO jobs (
        source_id, external_id, fingerprint_hash, company_id, title, description, description_html,
        location_raw, is_remote, employment_type, salary_min, salary_max, currency, posted_at, apply_url,
-       last_seen_at, updated_at, status
+       country_id, city_id, last_seen_at, updated_at, status
      )
      SELECT
        $1,
@@ -234,17 +247,19 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
        u.currency,
        u.posted_at,
        u.apply_url,
+       u.country_id,
+       u.city_id,
        now(),
        now(),
        'active'::job_status
      FROM UNNEST(
        $2::text[], $3::text[], $4::uuid[], $5::text[], $6::text[], $7::text[],
        $8::text[], $9::boolean[], $10::text[], $11::numeric[], $12::numeric[],
-       $13::text[], $14::timestamptz[], $15::text[]
+       $13::text[], $14::timestamptz[], $15::text[], $16::uuid[], $17::uuid[]
      ) AS u(
        external_id, fingerprint_hash, company_id, title, description, description_html,
        location_raw, is_remote, employment_type, salary_min, salary_max,
-       currency, posted_at, apply_url
+       currency, posted_at, apply_url, country_id, city_id
      )
      ON CONFLICT (source_id, external_id)
      DO UPDATE SET
@@ -261,6 +276,8 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
        currency = EXCLUDED.currency,
        posted_at = EXCLUDED.posted_at,
        apply_url = EXCLUDED.apply_url,
+       country_id = EXCLUDED.country_id,
+       city_id = EXCLUDED.city_id,
        last_seen_at = now(),
        updated_at = now(),
        status = 'active'::job_status,
@@ -282,6 +299,8 @@ async function persistBatchJobs(db: DbClient, sourceId: string, validJobs: Norma
       uniqueItems.map((i) => i.job.currency || null),
       uniqueItems.map((i) => (i.job.postedAt ? new Date(i.job.postedAt) : null)),
       uniqueItems.map((i) => i.job.applyUrl),
+      geo.map((g) => g.countryId),
+      geo.map((g) => g.cityId),
     ],
   );
 
