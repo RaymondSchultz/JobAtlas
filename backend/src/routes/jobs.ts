@@ -98,3 +98,15 @@ jobsRouter.get("/:id/similar", async (req, res) => {
   );
   res.json({ data: result.rows.map(mapJob) });
 });
+
+jobsRouter.get("/:id/apply", async (req, res) => {
+  const result = await pool.query("SELECT id, apply_url, title, status FROM jobs WHERE id = $1", [req.params.id]);
+  if (!result.rows[0]) throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
+  res.json({
+    id: result.rows[0].id,
+    title: result.rows[0].title,
+    applyUrl: result.rows[0].apply_url,
+    status: result.rows[0].status,
+  });
+});
+
