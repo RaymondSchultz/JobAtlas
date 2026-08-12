@@ -12,6 +12,7 @@ import { companiesRouter } from "./routes/companies.js";
 import { healthRouter } from "./routes/health.js";
 import { internalRouter } from "./routes/internal.js";
 import { jobsRouter } from "./routes/jobs.js";
+import { locationsRouter } from "./routes/locations.js";
 import { metadataRouter } from "./routes/metadata.js";
 import { resumeRouter } from "./routes/resume.js";
 import { searchRouter } from "./routes/search.js";
@@ -29,6 +30,7 @@ export function createApp() {
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1/jobs", jobsRouter);
   app.use("/api/v1/search", searchRouter);
+  app.use("/api/v1/locations", locationsRouter);
   app.use("/api/v1/companies", companiesRouter);
   app.use("/api/v1/bookmarks", bookmarksRouter);
   app.use("/api/v1/alerts", alertsRouter);

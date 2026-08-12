@@ -10,7 +10,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "migrate": "node dist/db/migrate.js",
-    "seed": "node dist/db/seed.js"
+    "seed": "node dist/db/seed.js",
+    "ingest": "tsx src/ingestion/cli.ts",
+    "seed:source-configs": "tsx src/ingestion/seed-source-configs.ts",
+    "seed:geo": "tsx src/geo/seed-geonames.ts",
+    "backfill:locations": "tsx src/geo/backfill-locations.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -18,10 +22,13 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-async-errors": "^3.1.1",
+    "fast-xml-parser": "^4.5.7",
+    "fflate": "^0.8.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "meilisearch": "^0.60.0",
     "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
     "pg": "^8.13.1",
     "tsx": "^4.19.2",
     "zod": "^3.24.1"
@@ -33,6 +40,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.11.10",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

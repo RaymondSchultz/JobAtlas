@@ -1,0 +1,93 @@
+{
+  "name": "Jobs/Apify/LinkedIn Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{'https://api.apify.com/v2/acts/apify~linkedin-jobs-scraper/run-sync-get-dataset-items?token=' + ($env.APIFY_TOKEN || '')}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\"searchTerms\": [\"Software Engineer\", \"Full Stack Developer\", \"Data Engineer\"], \"locations\": [\"United States\", \"Remote\"], \"maxItems\": 200}",
+        "options": {
+          "timeout": 300000
+        },
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 30000
+      },
+      "id": "run-apify-linkedin-actor",
+      "name": "Run Apify LinkedIn Actor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\"source\": \"linkedin\", \"fetchedAt\": \"={{$now.toISO()}}\", \"raw\": \"={{$json || []}}\"}",
+        "options": {}
+      },
+      "id": "build-processor-envelope",
+      "name": "Build Processor Envelope",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.INTERNAL_API_BASE_URL || 'https://jobatlas-backend.onrender.com'}}/api/internal/jobs/batch",
+        "sendHeaders": true,
+        "sendBody": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Service-Key",
+              "value": "={{$env.INTERNAL_SERVICE_KEY}}"
+            }
+          ]
+        },
+        "contentType": "json",
+        "jsonBody": "={{$json}}"
+      },
+      "id": "post-internal-jobs-batch",
+      "name": "POST Internal Jobs Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [720, 0]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [[{"node": "Run Apify LinkedIn Actor", "type": "main", "index": 0}]]
+    },
+    "Run Apify LinkedIn Actor": {
+      "main": [[{"node": "Build Processor Envelope", "type": "main", "index": 0}]]
+    },
+    "Build Processor Envelope": {
+      "main": [[{"node": "POST Internal Jobs Batch", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionTimeout": 1200,
+    "saveExecutionProgress": true
+  },
+  "active": false
+}

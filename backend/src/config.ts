@@ -10,6 +10,10 @@ export const config = {
   internalServiceKey: process.env.INTERNAL_SERVICE_KEY ?? "",
   meilisearchUrl: process.env.MEILISEARCH_URL ?? "",
   meiliMasterKey: process.env.MEILI_MASTER_KEY ?? "",
+  // In-process job ingestion, replacing the n8n schedule triggers.
+  ingestionEnabled: process.env.INGESTION_ENABLED === "true",
+  expiryCron: process.env.EXPIRY_CRON ?? "0 2 * * *",
+  expireAfterDays: Number(process.env.EXPIRE_AFTER_DAYS ?? 30),
 };
 
 export function assertRuntimeConfig() {

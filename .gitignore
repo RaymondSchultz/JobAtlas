@@ -19,6 +19,9 @@ out/
 **/.env
 !**/.env.example
 
+# Agent tooling config — holds provider API tokens
+.agents/
+
 # Logs & Cache
 *.log
 npm-debug.log*
