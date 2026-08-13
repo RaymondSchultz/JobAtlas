@@ -16,6 +16,23 @@ export const pool = new Pool({
   connectionTimeoutMillis: 30_000,
 });
 
+/**
+ * Without this listener the process exits.
+ *
+ * node-postgres emits 'error' on the pool when an *idle* connection drops, and
+ * an unhandled 'error' event is fatal in Node. Neon's pooled endpoint closes
+ * idle connections routinely, and the ingestion scheduler leaves the pool idle
+ * between runs — so this reliably killed a long-running server hours after it
+ * had otherwise been working fine.
+ *
+ * Logging is the correct response: the pool discards the broken client and
+ * subsequent queries transparently open a new one. There is no in-flight query
+ * to fail, which is precisely why nothing else surfaces the problem.
+ */
+pool.on("error", (error) => {
+  console.error("Postgres pool error on idle client (connection will be replaced):", error);
+});
+
 export type DbClient = pg.Pool | pg.PoolClient;
 
 
